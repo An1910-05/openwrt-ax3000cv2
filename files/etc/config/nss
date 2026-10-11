@@ -1,0 +1,8 @@
+config nss 'general'
+	option enabled '1'
+	option wifi_offload '1'
+	option topology 'wf810df-host-lan'
+	option fabric 'none'
+	option trunk 'wan'
+	option trunk_if '0'
+	option fw_mask '0x1'

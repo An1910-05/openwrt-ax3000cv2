@@ -1,0 +1,9 @@
+# Community runtime helpers; configuration is included by sysupgrade normally.
+/usr/libexec/wf810df-nss-host-lan
+/usr/libexec/platform/packet-steering.sh
+/usr/libexec/internet-led
+/etc/init.d/wf810df_nss_host_lan
+/etc/init.d/internet_led
+/etc/hotplug.d/net/90-wf810df-wifi-flowtable
+/etc/sysctl.d/91-wf810df-nss-trial.conf
+/lib/upgrade/keep.d/ax3000cv2-community

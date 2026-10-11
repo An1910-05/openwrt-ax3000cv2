@@ -1,0 +1,11 @@
+/build/
+/artifacts/
+/.cache/
+*.tar.gz
+*.ubi
+*.itb
+*.bin
+__pycache__/
+*.pyc
+*private*
+*credentials*

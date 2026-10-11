@@ -1,0 +1,150 @@
+diff --git a/package/kernel/linux/modules/netdevices.mk b/package/kernel/linux/modules/netdevices.mk
+index 04c0466..9ed8189 100644
+--- a/package/kernel/linux/modules/netdevices.mk
++++ b/package/kernel/linux/modules/netdevices.mk
+@@ -2522,3 +2522,22 @@ define KernelPackage/sparx5-switch/description
+ endef
+ 
+ $(eval $(call KernelPackage,sparx5-switch))
++
++define KernelPackage/dsa-yt921x
++  SUBMENU:=$(NETWORK_DEVICES_MENU)
++  TITLE:=Motorcomm YT921x DSA switch support
++  DEPENDS:=+kmod-dsa
++  KCONFIG:= \
++	CONFIG_NET_DSA_YT921X \
++	CONFIG_NET_DSA_TAG_YT921X
++  FILES:= \
++	$(LINUX_DIR)/drivers/net/dsa/yt921x.ko \
++	$(LINUX_DIR)/net/dsa/tag_yt921x.ko
++  AUTOLOAD:=$(call AutoLoad,30,tag_yt921x yt921x)
++endef
++
++define KernelPackage/dsa-yt921x/description
++ Kernel module for Motorcomm YT9215/YT9218 DSA switch and tag protocol
++endef
++
++$(eval $(call KernelPackage,dsa-yt921x))
+diff --git a/package/nss/nss-tools/files/nss-dwmac-up b/package/nss/nss-tools/files/nss-dwmac-up
+index 348fc7a..89aebfc 100644
+--- a/package/nss/nss-tools/files/nss-dwmac-up
++++ b/package/nss/nss-tools/files/nss-dwmac-up
+@@ -340,3 +340,12 @@ done
+ 
+ # Last, so nothing above waits on it (see wifi_sync_netifd).
+ wifi_sync_netifd
++
++# WF810DF keeps the proprietary-tag LAN on the host. Apply its native-LAN
++# path only after the NSS plane and IRQ placement are complete.
++if [ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = "fpt,wf810df" ] &&
++   grep -q 'phys_if 0: started dev=wan' "$GLUE_STATUS"; then
++    touch /var/run/wf810df-nss-plane-ready
++    /usr/libexec/wf810df-nss-host-lan || echo "WARN: WF810DF native LAN path did not apply"
++fi
++exit 0
+diff --git a/package/nss/nss-tools/files/nss-offload.defaults b/package/nss/nss-tools/files/nss-offload.defaults
+index 7d82926..3cddca5 100644
+--- a/package/nss/nss-tools/files/nss-offload.defaults
++++ b/package/nss/nss-tools/files/nss-offload.defaults
+@@ -1,3 +1,4 @@
++[ "$(uci -q get nss.general.enabled)" = "0" ] && exit 0
+ uci -q batch << EOI
+ # Keep OpenWrt's packet-steering service out of the NSS data path: its model is a
+ # host NAPI per hardware queue, which does not describe a datapath where the
+diff --git a/target/linux/qualcommax/image/ipq50xx.mk b/target/linux/qualcommax/image/ipq50xx.mk
+index 6310946..60ed134 100644
+--- a/target/linux/qualcommax/image/ipq50xx.mk
++++ b/target/linux/qualcommax/image/ipq50xx.mk
+@@ -489,3 +489,20 @@ define Device/zyxel_scr50axe
+ 		ipq-wifi-zyxel_scr50axe
+ endef
+ TARGET_DEVICES += zyxel_scr50axe
++
++define Device/wf810df
++	$(call Device/FitImage)
++	$(call Device/UbiFit)
++	DEVICE_DTS := ipq5018-wf810df
++	DEVICE_DTS_CONFIG := config@1
++	DEVICE_VENDOR := FPT
++	DEVICE_MODEL := AX3000CV2 NSS Community
++	SUPPORTED_DEVICES += fpt,wf810df fpt,ax3000cv2 actiontec,wf810df
++	SOC := ipq5018
++	BLOCKSIZE := 128k
++	PAGESIZE := 2048
++	NAND_SIZE := 256m
++	UBINIZE_OPTS := -E 5
++	DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 kmod-dsa-yt921x
++endef
++TARGET_DEVICES += wf810df
+diff --git a/target/linux/qualcommax/ipq50xx/base-files/etc/board.d/02_network b/target/linux/qualcommax/ipq50xx/base-files/etc/board.d/02_network
+index e62e47f..4b01efa 100644
+--- a/target/linux/qualcommax/ipq50xx/base-files/etc/board.d/02_network
++++ b/target/linux/qualcommax/ipq50xx/base-files/etc/board.d/02_network
+@@ -7,6 +7,9 @@ ipq50xx_setup_interfaces()
+ {
+ 	local board="$1"
+ 	case $board in
++	fpt,wf810df)
++		ucidef_set_interfaces_lan_wan "lan1 lan2 lan3" "wan"
++		;;
+ 	elecom,wrc-x3000gs2|\
+ 	elecom,wrc-x3000gst2|\
+ 	iodata,wn-dax3000gr|\
+diff --git a/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata b/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
+index 388b01b..3d0d606 100644
+--- a/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
++++ b/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
+@@ -16,6 +16,11 @@ board=$(board_name)
+ case "$FIRMWARE" in
+ "ath11k/IPQ5018/hw1.0/cal-ahb-c000000.wifi.bin")
+ 	case "$board" in
++	fpt,wf810df)
++		caldata_extract "0:ART" 0x1000 0x20000
++		ath11k_patch_mac $(macaddr_add $(get_mac_label_dt) 2) 0
++		ath11k_set_macflag
++		;;
+ 	cmcc,mr3000d-ci)
+ 		caldata_extract "0:art" 0x1000 0x20000
+ 		wlan_mac=$(mtd_get_mac_binary 0:art 12)
+@@ -104,6 +109,11 @@ case "$FIRMWARE" in
+ 	;;
+ "ath11k/QCN6122/hw1.0/cal-ahb-b00a040.wifi.bin")
+ 	case "$board" in
++	fpt,wf810df)
++		caldata_extract "0:ART" 0x26800 0x20000
++		ath11k_patch_mac $(macaddr_add $(get_mac_label_dt) 3) 0
++		ath11k_set_macflag
++		;;
+ 	cmcc,mr3000d-ci)
+ 		caldata_extract "0:art" 0x26800 0x20000
+ 		wlan_mac=$(mtd_get_mac_binary 0:art 18)
+diff --git a/target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh b/target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh
+index c6378fd..4f86515 100644
+--- a/target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh
++++ b/target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh
+@@ -347,6 +347,11 @@ linksys_mx_pre_upgrade() {
+ 
+ platform_check_image() {
+ 	case "$(board_name)" in
++	fpt,wf810df)
++		[ "$(find_mtd_index rootfs)" = "20" ] &&
++		[ "$(cat /sys/class/mtd/mtd20/size)" = "254803968" ] || return 1
++		nand_do_platform_check "wf810df" "$1"
++		;;
+ 	cudy,p5)
+ 		nand_do_platform_check "$(board_name)" "$1"
+ 		;;
+@@ -378,6 +383,13 @@ platform_pre_upgrade() {
+ 
+ platform_do_upgrade() {
+ 	case "$(board_name)" in
++	fpt,wf810df)
++		# Existing WF810DF rootfs UBI only; never alter protected boot data.
++		[ "$(find_mtd_index rootfs)" = "20" ] &&
++		[ "$(cat /sys/class/mtd/mtd20/size)" = "254803968" ] || return 1
++		CI_UBIPART="rootfs"
++		nand_do_upgrade "$1"
++		;;
+ 	cudy,p5)
+ 		cudy_p5_do_upgrade "$1"
+ 		;;

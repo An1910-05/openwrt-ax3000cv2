@@ -1,0 +1,28 @@
+name: Build firmware
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib gettext git libncurses-dev libssl-dev python3 python3-setuptools rsync unzip zlib1g-dev file wget curl subversion swig time
+      - name: Prepare pinned sources
+        run: python3 scripts/prepare-build.py --output "$RUNNER_TEMP/openwrt"
+      - name: Validate publishable source
+        run: python3 scripts/validate-source.py
+      - name: Build
+        run: JOBS=2 sh scripts/build.sh "$RUNNER_TEMP/openwrt"
+      - name: Collect upgrade and RAM images
+        run: python3 scripts/collect-release.py --tree "$RUNNER_TEMP/openwrt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ax3000cv2-community-preview
+          path: artifacts/
+          retention-days: 14

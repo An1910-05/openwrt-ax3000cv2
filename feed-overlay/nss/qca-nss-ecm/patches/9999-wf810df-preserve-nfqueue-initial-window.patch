@@ -1,0 +1,50 @@
+--- a/ecm_classifier_default.c
++++ b/ecm_classifier_default.c
+@@ -31,6 +31,7 @@
+ #include <linux/netfilter_ipv4.h>
+ #include <linux/netfilter_bridge.h>
+ #include <net/netfilter/nf_conntrack.h>
++#include <net/netfilter/nf_conntrack_acct.h>
+ #include <net/netfilter/nf_conntrack_helper.h>
+ #include <net/netfilter/nf_conntrack_l4proto.h>
+ #include <net/netfilter/nf_conntrack_core.h>
+@@ -70,6 +71,18 @@
+  * Default path for sysctl
+  */
+ #define ECM_CLASSIFIER_DEFAULT_PATH "net/ecm/ecm_classifier_default"
++
++/* WF810DF: same original-direction window as the existing nft flow guard.
++ * A total-packet delay cannot preserve this window on asymmetric flows.
++ * No accounting means no acceleration, rather than bypassing NFQUEUE.
++ */
++static unsigned int initial_original_packets = 20;
++module_param(initial_original_packets, uint, 0644);
++MODULE_PARM_DESC(initial_original_packets, "Keep this many original-direction TCP/UDP packets on the host before ECM acceleration");
++static unsigned int initial_reply_packets = 10;
++module_param(initial_reply_packets, uint, 0644);
++MODULE_PARM_DESC(initial_reply_packets, "Keep this many reply-direction TCP/UDP packets on the host before ECM acceleration");
++
+ 
+ /*
+  * struct ecm_classifier_default_internal_instance
+@@ -436,6 +449,20 @@
+ 	spin_unlock_bh(&ct->lock);
+ 
+ check_delay:
++
++	if ((initial_original_packets || initial_reply_packets) &&
++	    (cdii->protocol == IPPROTO_TCP || cdii->protocol == IPPROTO_UDP)) {
++		struct nf_conn_acct *acct;
++
++		ct = nf_ct_get(skb, &ctinfo);
++		acct = ct ? nf_conn_acct_find(ct) : NULL;
++		if (!acct ||
++		    atomic64_read(&acct->counter[IP_CT_DIR_ORIGINAL].packets) <= initial_original_packets ||
++		    atomic64_read(&acct->counter[IP_CT_DIR_REPLY].packets) <= initial_reply_packets) {
++			spin_lock_bh(&ecm_classifier_default_lock);
++			goto accel_no;
++		}
++	}
+ 	/*
+ 	 * Should we delay the acceleration?
+ 	 */

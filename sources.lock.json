@@ -1,0 +1,45 @@
+{
+  "openwrt": {
+    "url": "https://github.com/kuncy7/openwrt-nss-edma.git",
+    "commit": "ddd9df1c4d15410cc6200226a0b98950d3b1eb14"
+  },
+  "feeds": {
+    "packages": {
+      "url": "https://git.openwrt.org/feed/packages.git",
+      "commit": "0526d6d9cad0a9052fc9d49572e2f8968a1bf8dd"
+    },
+    "luci": {
+      "url": "https://git.openwrt.org/project/luci.git",
+      "commit": "36720dd716c7f7008af95c0d520edefab621adb7"
+    },
+    "routing": {
+      "url": "https://git.openwrt.org/feed/routing.git",
+      "commit": "4b9891b9136259f93294a424507ed24c5e8c1cbd"
+    },
+    "telephony": {
+      "url": "https://git.openwrt.org/feed/telephony.git",
+      "commit": "5d68d53c160a325ea9d03fce393e051573bcc736"
+    },
+    "nss": {
+      "url": "https://github.com/kuncy7/nss-packages.git",
+      "commit": "94f44cc3bd4259b9b49f186f157e90e06b5ab003"
+    }
+  },
+  "board_data": {
+    "url": "https://github.com/michioxd/upstream-wifi-fw",
+    "commit": "ca2e89f1ef96cc88604c93e50e66f40ae092dc1c",
+    "prefix": "ath11k-firmware/IPQ5018_QCN6122_QCN6122/hw1.0/2.8/WLAN.HK.2.8-01357-QCAHKSWPL_SILICONZ-1.56794.4/",
+    "radios": {
+      "IPQ5018": {
+        "file": "board-2.bin",
+        "sha256": "2ace362938fd093f658db0ef7ae5806d9fee21602b204fb374a1edb43681aff7",
+        "board_id": 35
+      },
+      "QCN6122": {
+        "file": "qcn6122/board-2.bin",
+        "sha256": "a8fa3d3d893b192e252e07d20fd72896b76f26f63d59fc76f32df83d569420c0",
+        "board_id": 96
+      }
+    }
+  }
+}

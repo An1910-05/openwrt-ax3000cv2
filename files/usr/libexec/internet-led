@@ -1,0 +1,104 @@
+#!/bin/sh
+# Internet reachability indicator for the WF810DF white/red LEDs.
+. /lib/functions.sh
+config_load internet_led
+config_get interval main interval 10
+config_get threshold main fail_threshold 2
+config_get targets main targets '1.1.1.1 8.8.8.8'
+case "$interval" in ''|*[!0-9]*) interval=10 ;; esac
+case "$threshold" in ''|*[!0-9]*) threshold=2 ;; esac
+[ "$interval" -ge 5 ] || interval=5
+[ "$threshold" -ge 1 ] || threshold=1
+white=/sys/class/leds/white:status
+red=/sys/class/leds/red:power
+[ -w "$white/brightness" ] && [ -w "$red/brightness" ] || exit 1
+state=unknown
+
+repair_led_gpio() {
+    # The Wi-Fi firmware can alter GPIO0's mux after leds-gpio has claimed it.
+    # Brightness writes alone only update the value, leaving it in input/func7.
+    # Reprobe this board's LED driver to restore mux and output direction.
+    [ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = fpt,wf810df ] || return 0
+    [ -r /sys/kernel/debug/gpio ] || return 0
+    if awk '
+        $1 == "gpio0" || $1 == "gpio1" {
+            seen++; if ($3 != "out" || $5 != "func0") bad=1
+        }
+        END { exit !(seen == 2 && !bad) }
+    ' /sys/kernel/debug/gpio; then
+        return 0
+    fi
+    local driver=/sys/bus/platform/drivers/leds-gpio
+    [ -e "$driver/leds" ] || return 1
+    echo leds > "$driver/unbind" || return 1
+    if ! echo leds > "$driver/bind"; then
+        logger -t internet-led "LED GPIO driver rebind failed"
+        return 1
+    fi
+    logger -t internet-led "LED GPIO mux/output restored"
+}
+
+set_led() {
+    local path="$1" value="$2"
+    case "$(cat "$path/trigger")" in
+        *'[none]'*) ;;
+        *) echo none > "$path/trigger" ;;
+    esac
+    [ "$(cat "$path/brightness")" = "$value" ] || echo "$value" > "$path/brightness"
+}
+
+display() {
+    local next="$1"
+    repair_led_gpio || return 1
+    case "$next" in
+        online) set_led "$red" 0; set_led "$white" 1 ;;
+        offline) set_led "$white" 0; set_led "$red" 1 ;;
+        *) return 1 ;;
+    esac
+    if [ "$state" != "$next" ]; then
+        logger -t internet-led "$next"
+        state="$next"
+    fi
+    echo "$next" > /var/run/internet-led.state
+}
+
+check_internet() {
+    [ "$(cat /sys/class/net/wan/carrier 2>/dev/null)" = 1 ] || return 2
+    local up="$(ubus -S call network.interface.wan status 2>/dev/null | jsonfilter -e '@.up')"
+    [ "$up" = true ] || return 2
+    local target
+    for target in $targets; do
+        case "$target" in ''|*[!0-9.]*) continue ;; esac
+        ping -I wan -c 1 -W 2 -w 3 "$target" >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
+case "$1" in
+    --display) display "$2"; exit $? ;;
+    --check-once)
+        if check_internet; then display online; else display offline; fi
+        exit 0
+        ;;
+    '') ;;
+    *) exit 2 ;;
+esac
+
+trap 'exit 0' TERM INT
+failures=0
+display offline
+while :; do
+    check_internet
+    result=$?
+    case "$result" in
+        0) failures=0; display online ;;
+        2) failures=0; display offline ;;
+        *)
+            failures=$((failures + 1))
+            if [ "$state" != online ] || [ "$failures" -ge "$threshold" ]; then
+                display offline
+            fi
+            ;;
+    esac
+    sleep "$interval"
+done

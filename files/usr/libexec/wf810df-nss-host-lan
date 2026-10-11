@@ -1,0 +1,39 @@
+#!/bin/sh
+# Mark LAN traffic for the native host path before NSS acceleration.
+[ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = "fpt,wf810df" ] || exit 0
+[ "$(uci -q get nss.general.enabled)" = "1" ] || exit 0
+[ -e /var/run/wf810df-nss-plane-ready ] || exit 0
+grep -q 'phys_if 0: started dev=wan' /sys/kernel/debug/qca-dwmac-nss/status || exit 1
+lock=/var/run/wf810df-nss-host-lan.lock
+mkdir "$lock" 2>/dev/null || exit 0
+trap 'rmdir "$lock"' EXIT HUP INT TERM
+orig="$(cat /sys/module/ecm/parameters/initial_original_packets 2>/dev/null)"
+reply="$(cat /sys/module/ecm/parameters/initial_reply_packets 2>/dev/null)"
+case "$orig:$reply" in *[!0-9:]*|:*|*:) exit 1 ;; esac
+[ "$orig" -ge 20 ] && [ "$reply" -ge 10 ] || exit 1
+ethtool -K lan tx off || exit 1
+/usr/libexec/platform/packet-steering.sh 0 || exit 1
+rules=/var/run/wf810df-nss-host-lan.nft
+: > "$rules"
+if nft list table netdev wf810df_nss_lan_ingress >/dev/null 2>&1; then
+    echo 'delete table netdev wf810df_nss_lan_ingress' >> "$rules"
+fi
+if nft list table inet wf810df_nss_host_lan >/dev/null 2>&1; then
+    echo 'delete table inet wf810df_nss_host_lan' >> "$rules"
+fi
+cat >> "$rules" <<EOF
+table netdev wf810df_nss_lan_ingress {
+ chain lan1 { type filter hook ingress device "lan1" priority -10; policy accept; meta mark set meta mark | 0x10000000; }
+ chain lan2 { type filter hook ingress device "lan2" priority -10; policy accept; meta mark set meta mark | 0x10000000; }
+ chain lan3 { type filter hook ingress device "lan3" priority -10; policy accept; meta mark set meta mark | 0x10000000; }
+}
+table inet wf810df_nss_host_lan {
+ flowtable lan_ft { hook ingress priority 0; devices = { "wan", "lan1", "lan2", "lan3" }; counter; }
+ chain classify { type filter hook prerouting priority -150; policy accept; meta mark & 0x10000000 != 0 ct mark set ct mark | 0x10000000; }
+ chain forward { type filter hook forward priority 10; policy accept;
+  meta l4proto { tcp, udp } ct state established iifname { "br-lan", "wan" } oifname { "br-lan", "wan" } ct mark & 0x10000000 != 0 ct original packets > $orig ct reply packets > $reply counter flow add @lan_ft
+ }
+}
+EOF
+nft -c -f "$rules" && nft -f "$rules" || exit 1
+logger -t wf810df-nss "Native YT LAN software flow offload ready; WAN RPS=2, LAN RPS=1, LAN TX checksum software, Wi-Fi NSS separate"

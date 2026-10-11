@@ -1,0 +1,33 @@
+#!/bin/sh
+# Refresh the existing firewall fastpath after an AP is recreated or DFS completes.
+[ "$ACTION" = add ] && [ "$INTERFACE" = phy1-ap0 ] || exit 0
+[ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = fpt,wf810df ] || exit 0
+[ "$(uci -q get firewall.@defaults[0].flow_offloading)" = 1 ] || exit 0
+(
+    trap '' HUP
+    lock=/tmp/wf810df-wifi-flowtable.lock
+    mkdir "$lock" 2>/dev/null || exit 0
+    trap 'rmdir "$lock"' EXIT
+    attempts=0
+    while [ "$attempts" -lt 50 ]; do
+        sleep 2
+        attempts=$((attempts + 1))
+        [ -d /sys/class/net/br-lan/lower_phy1-ap0 ] || continue
+        iw dev phy1-ap0 info 2>/dev/null | grep -q '^[[:space:]]*ssid ' || continue
+        /etc/init.d/firewall enabled || exit 0
+        checks=0
+        while [ "$checks" -lt 3 ]; do
+            sleep 3
+            [ -d /sys/class/net/br-lan/lower_phy1-ap0 ] || exit 0
+            nft list flowtable inet fw4 ft >/dev/null 2>&1 || exit 0
+            if ! nft list flowtable inet fw4 ft | grep -F -q '"phy1-ap0"'; then
+                fw4 -q reload || exit 1
+                logger -t wf810df-wifi 'Restored Wi-Fi in flowtable after AP became ready'
+            fi
+            checks=$((checks + 1))
+        done
+        logger -t wf810df-wifi 'Verified Wi-Fi flowtable after AP became ready'
+        exit 0
+    done
+    logger -t wf810df-wifi 'AP not ready within 100 seconds; no firewall changes made'
+) </dev/null >/dev/null 2>&1 &
